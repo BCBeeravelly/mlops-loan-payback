@@ -4,7 +4,7 @@ A production-grade machine learning system designed for reproducibility and scal
 
 ## 🚀 Project Roadmap
 
-- [ ] **Phase 1:** Setup & Data Ingestion (In Progress)
+- [x] **Phase 1:** Setup & Data Ingestion (In Progress)
 - [ ] **Phase 2:** Preprocessing & Feature Engineering
 - [ ] **Phase 3:** Model Training & MLflow Tracking
 - [ ] **Phase 4:** Evaluation & Testing
@@ -13,3 +13,20 @@ A production-grade machine learning system designed for reproducibility and scal
 - [ ] **Phase 7:** Monitoring (Evidently AI)
 - [ ] **Phase 8:** Containerization (Docker)
 - [ ] **Phase 9:** Cloud Deployment (GCP Cloud Run)
+
+## 🛠️ Quick Start
+
+**1. Environment Setup**
+
+```bash
+# Clone and enter repo
+git clone [https://github.com/your-username/mlops-loan-payback.git](https://github.com/your-username/mlops-loan-payback.git)
+cd mlops-loan-payback
+
+# Create and activate virtual env
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
