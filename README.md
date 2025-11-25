@@ -20,7 +20,7 @@ A production-grade machine learning system designed for reproducibility and scal
 
 ```bash
 # Clone and enter repo
-git clone [https://github.com/your-username/mlops-loan-payback.git](https://github.com/your-username/mlops-loan-payback.git)
+git clone [https://github.com/bcbeeravelly/mlops-loan-payback.git](https://github.com/bcbeeravelly/mlops-loan-payback.git)
 cd mlops-loan-payback
 
 # Create and activate virtual env
