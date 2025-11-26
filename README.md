@@ -1,11 +1,11 @@
-# mlops-loan-payback
+# Loan Payback Prediction
 
 A production-grade machine learning system designed for reproducibility and scalability. Includes automated data pipelines, unit testing, model registry management, and a deployed inference API using FastAPI, SQLModel, and GCP. Implements full observability and feedback loops.
 
 ## 🚀 Project Roadmap
 
-- [x] **Phase 1:** Setup & Data Ingestion (In Progress)
-- [ ] **Phase 2:** Preprocessing & Feature Engineering
+- [x] **Phase 1:** Setup & Data Ingestion (Completed)
+- [x] **Phase 2:** Preprocessing & Feature Engineering (Completed)
 - [ ] **Phase 3:** Model Training & MLflow Tracking
 - [ ] **Phase 4:** Evaluation & Testing
 - [ ] **Phase 5:** API Serving (FastAPI)
