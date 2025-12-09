@@ -1,153 +1,174 @@
 import pandas as pd
 from pathlib import Path
 import joblib
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder, OrdinalEncoder, FunctionTransformer
 import numpy as np
 
-# --- Configuration (Paths and Constants) ---
+# --- 1. CONFIGURATION AND CONSTANTS ---
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_DATA_DIR = PROJECT_ROOT / "data" / "raw"
 PROCESSED_DATA_DIR = PROJECT_ROOT / "data" / "processed"
 PIPELINE_DIR = PROJECT_ROOT / "models" / "pipelines"
 PIPELINE_DIR.mkdir(parents=True, exist_ok=True)
 
 TARGET_COLUMN = 'loan_paid_back'
-RANDOM_STATE = 42
 
 # --- Feature Lists ---
-NUMERICAL_FEATURES = ['annual_income', 'debt_to_income_ratio', 'credit_score', 'loan_amount', 'interest_rate']
-NOMINAL_FEATURES = ['gender', 'marital_status', 'education_level','employment_status', 'loan_purpose']
-ORDINAL_FEATURES = ['grade_subgrade']
 
+# 1. Features requiring Log Transform + Scaling
+LOG_NUMERICAL_FEATURES = ['annual_income']
+
+# 2. Features requiring ONLY Scaling
+BASIC_NUMERICAL_FEATURES = [
+    'debt_to_income_ratio', 
+    'credit_score', 
+    'loan_amount', 
+    'interest_rate'
+]
+
+# 3. Nominal features requiring One-Hot Encoding
+NOMINAL_FEATURES = [
+    'gender', 
+    'marital_status', 
+    'education_level',
+    'employment_status', 
+    'loan_purpose'
+]
+
+# 4. Ordinal features requiring Custom Mapping
+ORDINAL_FEATURES = [
+    'grade_subgrade'
+]
+
+# --- Custom Mappers ---
 GRADE_SUBGRADE_ORDER = [f'{g}{s}' for g in 'ABCDEFG' for s in '12345']
 ORDINAL_MAPPERS = {
     'grade_subgrade': GRADE_SUBGRADE_ORDER
 }
 
-# Custom log transform
+
+# --- 2. TRANSFORMATION LOGIC ---
+
 def log_transform(X):
     return np.log1p(X)
 
-LOG_TRANSFORMER = FunctionTransformer(log_transform, validate=True)
+# FIX: Added feature_names_out="one-to-one" to suppress warning and handle column names
+LOG_TRANSFORMER = FunctionTransformer(
+    log_transform, 
+    validate=True, 
+    feature_names_out="one-to-one"
+)
 
-def get_numerical_pipeline(use_log_transform: bool = False) -> Pipeline:
-    """Returns a pipeline for numerical features, optionally including log transformation."""
-    steps = []
-    if use_log_transform:
-        steps.append(('log_transform', LOG_TRANSFORMER))
-    steps.append(('scaler', StandardScaler()))
-    return Pipeline(steps=steps)
 
-def get_categorical_pipeline(use_ordinal:bool = False) -> ColumnTransformer:
-    """
-    Returns the full feature engineering pipeline (ColumnTransformer).
-    
-    If use_ordinal=True, OrdinalEncoder is used for 'grade_subgrade'.
-    Otherwise, OneHotEncoder is used for all categorical features.
-    """
-    
+# --- 3. MODULAR BUILDERS ---
+
+def get_numerical_transformers(strategy: str) -> list:
+    """Returns the list of numerical transformer tuples based on strategy."""
     transformers = []
     
-    # 1. Numerical Pipeline (Always Scaled)
-    numerical_pipe = get_numerical_pipeline()
+    # Define the pipelines explicitly here
+    log_pipeline = Pipeline(steps=[
+        ('log', LOG_TRANSFORMER),
+        ('scaler', StandardScaler())
+    ])
     
-    if use_ordinal:
-        # Targeted Strategy
-        ordinal_encoder = OrdinalEncoder(categories=[
-            ORDINAL_MAPPERS['grade_subgrade']
-        ], handle_unknown='use_encoded_value', unknown_value=-1)
+    standard_pipeline = Pipeline(steps=[
+        ('scaler', StandardScaler())
+    ])
+
+    # Assign them based on strategy
+    if strategy == 'targeted':
+        # Use log pipe for income, standard pipe for the rest
+        transformers.append(('num_log', log_pipeline, LOG_NUMERICAL_FEATURES))
+        transformers.append(('num_basic', standard_pipeline, BASIC_NUMERICAL_FEATURES))
         
+    elif strategy == 'baseline':
+        # Use standard pipe for EVERYTHING
+        all_numericals = LOG_NUMERICAL_FEATURES + BASIC_NUMERICAL_FEATURES
+        transformers.append(('num_all', standard_pipeline, all_numericals))
+        
+    return transformers
+
+
+def get_categorical_transformers(strategy: str) -> list:
+    """Returns the list of categorical transformer tuples based on strategy."""
+    transformers = []
+    
+    # Define encoders explicitly here
+    ordinal_encoder = OrdinalEncoder(
+        categories=[ORDINAL_MAPPERS['grade_subgrade']], 
+        handle_unknown='use_encoded_value', 
+        unknown_value=-1
+    )
+    
+    onehot_encoder = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+    
+    # Assign them based on strategy
+    if strategy == 'targeted':
+        # Use Ordinal for Grade, OneHot for the rest
         transformers.append(('ordinal', ordinal_encoder, ORDINAL_FEATURES))
-        transformers.append(('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False), NOMINAL_FEATURES))
+        transformers.append(('onehot', onehot_encoder, NOMINAL_FEATURES))
         
-    else:
-        # Baseline Strategy
-        all_nominal_and_ordinal = NOMINAL_FEATURES + ORDINAL_FEATURES
-        transformers.append(('onehot_all', OneHotEncoder(handle_unknown='ignore', sparse_output=False), all_nominal_and_ordinal))
+    elif strategy == 'baseline':
+        # Use OneHot for EVERYTHING (Ignore Ranks)
+        all_categoricals = ORDINAL_FEATURES + NOMINAL_FEATURES
+        transformers.append(('onehot_all', onehot_encoder, all_categoricals))
         
-    # Add numerical preprocessing
-    numerical_features_to_scale = NUMERICAL_FEATURES
+    return transformers
+
+
+# --- 4. PIPELINE FACTORY ---
+
+def get_feature_pipelines(strategy: str = 'baseline') -> Pipeline:
+    """
+    Assembles the final pipeline by combining modular transformer lists.
+    """
+    # Load Data (needed to initialize the ColumnTransformer structure)
+    train_df = pd.read_csv(PROCESSED_DATA_DIR / "local_train.csv")
+    X = train_df.drop(columns=[TARGET_COLUMN])
+    y = train_df[TARGET_COLUMN]
+
+    # Combine the lists from our builders
+    # This keeps numerical and categorical logic separate but joins them at the end
+    all_transformers = get_numerical_transformers(strategy) + get_categorical_transformers(strategy)
+    
+    # Build the ColumnTransformer
     preprocessor = ColumnTransformer(
-        transformers=[
-            ('num', numerical_pipe, numerical_features_to_scale),
-        ] + transformers,
+        transformers=all_transformers,
         remainder='drop',
         verbose_feature_names_out=False
     )
     
-    preprocessor.set_output(transform='pandas')
-    return preprocessor
+    preprocessor.set_output(transform="pandas")
 
-# --- Pipeline Factory ---
-
-def get_feature_pipelines(strategy: str = 'baseline') -> Pipeline:
-    """
-    The main factory function that returns a full ML Pipeline object based on strategy.
-    
-    Args:
-        strategy (str): 'baseline', 'targeted' or 'derived_1'
-    """
-    
-    train_df = pd.read_csv(PROCESSED_DATA_DIR / "local_train.csv")
-    X = train_df.drop(columns=[TARGET_COLUMN])
-    y = train_df[TARGET_COLUMN]
-    
-    # --- Preprocessor Selection ---
-    if strategy == 'targeted':
-        # Targeted Pipeline: Log Transform Income + Ordinal for Grade
-        numerical_pipe_with_log = get_numerical_pipeline(use_log_transform=True)
-        preprocessor = get_categorical_pipeline(use_ordinal=True)
-        
-        # Override the numerical transformer in the ColumnTransformer
-        preprocessor.transformers[0] = ('num', numerical_pipe_with_log, NUMERICAL_FEATURES)
-        
-    elif strategy == 'baseline':
-        # Baseline Pipeline: No log transform, all categoricals as nominal
-        preprocessor = get_categorical_pipeline(use_ordinal=False)
-    
-    elif strategy == 'derived_1':
-        
-        numerical_pipe_with_log = get_numerical_pipeline(use_log_transform=True)
-        preprocessor = get_categorical_pipeline(use_ordinal=True)
-        preprocessor.transformers[0] = ('num', numerical_pipe_with_log, NUMERICAL_FEATURES)
-        
-    else:
-        raise ValueError(f"Unknown strategy: {strategy}")
-    
-    # --- Create the Full Pipeline (Preprocessor + Estimator Placeholder) ---
+    # Wrap in Pipeline
     full_pipeline = Pipeline(steps=[
         ('preprocessor', preprocessor)
     ])
     
     return full_pipeline, X, y
 
-# --- Execution and Saving ---
+
+# --- 5. EXECUTION ---
+
 def save_pipeline(pipeline: Pipeline, file_name: str):
-    """Saves the fitted pipeline object using joblib."""
     path = PIPELINE_DIR / file_name
     joblib.dump(pipeline, path)
-    print(f"Pipeline saved to {path}")
-    
+    print(f"✅ Pipeline saved to {path}")
+
 if __name__ == "__main__":
+    # 1. Baseline
+    print("\n--- Building Baseline Pipeline ---")
+    pipe_base, X, y = get_feature_pipelines(strategy='baseline')
+    pipe_base.fit(X, y)
+    save_pipeline(pipe_base, "baseline_pipeline.joblib")
     
-    PIPELINE_DIR.mkdir(parents=True, exist_ok=True)
+    # 2. Targeted
+    print("\n--- Building Targeted Pipeline ---")
+    pipe_target, X, y = get_feature_pipelines(strategy='targeted')
+    pipe_target.fit(X, y)
+    save_pipeline(pipe_target, "targeted_pipeline.joblib")
     
-    # --- Execute and Test the Baseline Pipeline ---
-    print("\n--- Testing Baseline Pipeline Creation ---")
-    pipeline_baseline, X_train, y_train = get_feature_pipelines(strategy='baseline')
-    pipeline_baseline.fit(X_train, y_train)
-    save_pipeline(pipeline_baseline, "baseline_pipeline.joblib")
-    print("✅ Feature engineering pipelines created and saved successfully.")
-    
-     # --- Execute and Test the Targeted Pipeline ---
-    
-    print("\n--- Testing Targeted Pipeline Creation ---")
-    pipeline_targeted, X_train, y_train = get_feature_pipelines(strategy='targeted')
-    pipeline_targeted.fit(X_train, y_train)
-    save_pipeline(pipeline_targeted, "targeted_pipeline.joblib")
-    print("✅ Feature engineering pipelines created and saved successfully.")
-    
-    print("\nFeature processing setup complete. Two pipelines saved in models/pipelines/")
+    print("\nSuccess! Feature pipelines are ready for Phase 3.")
